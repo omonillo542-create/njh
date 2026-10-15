@@ -124,20 +124,29 @@ user_data = {}
 DEFAULT_VOICE = UZBEK_VOICES["🧔 Erkak (Rasmiy)"]
 
 # =============================================
-# KEYBOARDLAR
+# KEYBOARDLAR (SODDALAŞTIRILDI)
 # =============================================
 
 def mode_keyboard() -> ReplyKeyboardMarkup:
+    """Soddalashtirilgan asosiy klaviatura: tez va oson tanlash uchun."""
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="1️⃣ Matn → Ovoz")],
-            [KeyboardButton(text="2️⃣ Ovoz → Matn")],
-            [KeyboardButton(text="👴 Grandpa effekti")],
-            [KeyboardButton(text="🤖 AI Yordamchi")],
-            [KeyboardButton(text="📜 Senariy tahlili")],
+            [
+                KeyboardButton(text="1️⃣ Matn → Ovoz"),
+                KeyboardButton(text="2️⃣ Ovoz → Matn"),
+            ],
+            [
+                KeyboardButton(text="👴 Grandpa effekti"),
+                KeyboardButton(text="🤖 AI Yordamchi"),
+            ],
+            [
+                KeyboardButton(text="⚙️ Ovozlar"),
+                KeyboardButton(text="ℹ️ Yordam"),
+            ],
         ],
         resize_keyboard=True,
-        input_field_placeholder="Tanlang...",
+        one_time_keyboard=False,
+        input_field_placeholder="Birini tanlang...",
     )
 
 
@@ -148,33 +157,37 @@ def voice_category_keyboard() -> InlineKeyboardMarkup:
             text=cat_name,
             callback_data=f"cat:{cat_name}"
         )])
+    # Oddiy qaytish tugmasi
+    buttons.append([InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="back_to_main")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def voice_list_keyboard(category: str) -> InlineKeyboardMarkup:
+    """Soddalashtirilgan ovozlar ro'yxati - har bir ovoz inline tugma bilan.
+    Oxirida Bosh menyu tugmasi mavjud.
+    """
     voices = VOICE_CATEGORIES.get(category, {})
     buttons = []
     for name, voice_id in voices.items():
+        # Kattaroq va aniqroq matn
         buttons.append([InlineKeyboardButton(
             text=name,
             callback_data=f"vsel:{voice_id}"
         )])
-    buttons.append([InlineKeyboardButton(
-        text="🔙 Orqaga",
-        callback_data="back_to_cats"
-    )])
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_to_cats")])
+    buttons.append([InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="back_to_main")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def restart_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="🔄 Boshidan boshlash")]],
+        keyboard=[[KeyboardButton(text="🔄 Boshidan boshlash"), KeyboardButton(text="🏠 Bosh menyu")]],
         resize_keyboard=True,
     )
 
 
 # =============================================
-# TTS FUNKSIYASI
+# (Qolgan funksiya va xatti-harakatlar o'zgarmadi)
 # =============================================
 
 async def text_to_speech(text: str, voice_id: str | None = None) -> bytes | None:
@@ -490,8 +503,7 @@ async def gemini_stt(audio_bytes: bytes, mime_type: str = "audio/ogg") -> str | 
                     "- Boshqa hech narsa yozmang (izoh, tushuntirish kerak emas)"
                 )}
             ]
-        }]
-    }
+        }]}
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -536,9 +548,9 @@ async def cmd_start(message: Message, state: FSMContext):
         "Men ikkala yo'nalishda ishlayman:\n"
         "1️⃣ <b>Matn → Ovoz</b> — yozgan matningizni ovozli xabar qilaman\n"
         "2️⃣ <b>Ovoz → Matn</b> — ovozli xabaringizni matnga aylantiraman\n\n"
-        "Avval <b>ovozni tanlang</b> (matn → ovoz rejimi uchun):\n",
+        "Avval <b>rejimni tanlang</b> yoki <b>ovozlarni sozlang</b>:",
         parse_mode=ParseMode.HTML,
-        reply_markup=voice_category_keyboard(),
+        reply_markup=mode_keyboard(),
     )
 
 
@@ -546,7 +558,7 @@ async def cmd_start(message: Message, state: FSMContext):
 async def cmd_help(message: Message):
     await message.answer(
         "ℹ️ <b>Yo'riqnoma</b>\n\n"
-        "1️⃣ /start — boshlash, ovoz tanlash\n"
+        "1️⃣ /start — boshlash, asosiy menyu\n"
         "2️⃣ Rejimni tanlang:\n"
         "   • 1️⃣ Matn → Ovoz (matn yozasiz, ovoz olasiz)\n"
         "   • 2️⃣ Ovoz → Matn (ovoz yuborasiz, matn olasiz)\n\n"
@@ -576,6 +588,22 @@ async def back_to_cats(callback: CallbackQuery):
         parse_mode=ParseMode.HTML,
         reply_markup=voice_category_keyboard(),
     )
+    await callback.answer()
+
+
+# --- Bosh menyuga qaytish (inline tugma orqali) ---
+@dp.callback_query(F.data == "back_to_main")
+async def back_to_main(callback: CallbackQuery):
+    # Edit qilinganda ham, yangi menyu yuborish yaxshi
+    try:
+        await callback.message.edit_text(
+            "🏠 <b>Bosh menyu</b> — quyidagi tugmalardan birini tanlang:",
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception:
+        # Ba'zan edit mumkin bo'lmaydi — shunchaki yangi xabar yuboramiz
+        pass
+    await callback.message.answer("🏠 Bosh menyu:", reply_markup=mode_keyboard())
     await callback.answer()
 
 
@@ -623,9 +651,9 @@ async def restart(message: Message, state: FSMContext):
 
     await message.answer(
         "🔄 <b>Qaytadan boshlaymiz!</b>\n\n"
-        "Avval <b>ovozni tanlang:</b>",
+        "Avval <b>rejimni tanlang</b> yoki <b>ovozlarni sozlang</b>:",
         parse_mode=ParseMode.HTML,
-        reply_markup=voice_category_keyboard(),
+        reply_markup=mode_keyboard(),
     )
 
 
@@ -687,6 +715,12 @@ async def mode_chosen(message: Message, state: FSMContext):
             parse_mode=ParseMode.HTML,
         )
         await state.set_state(Flow.waiting_script)
+
+    elif text == "⚙️ Ovozlar":
+        await message.answer("🎙️ Ovozlarni tanlang:", reply_markup=voice_category_keyboard())
+
+    elif text == "ℹ️ Yordam":
+        await cmd_help(message)
 
     else:
         await message.answer(
