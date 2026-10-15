@@ -852,6 +852,36 @@ async def stt_wrong_type(message: Message):
     await message.answer("⚠️ Iltimos, <b>ovozli xabar</b> yuboring (mikrofon tugmasi bosib ushlab turing).", parse_mode=ParseMode.HTML)
 
 
+@dp.message(Command("diag"))
+async def diag(message: Message):
+    """Diagnostika: at a glance show env keys and endpoint reachability."""
+    checks = []
+    checks.append(f"BOT_TOKEN: {'SET' if BOT_TOKEN else 'MISSING'}")
+    checks.append(f"OPENROUTER_API_KEY: {'SET' if OPENROUTER_API_KEY else 'MISSING'}")
+    checks.append(f"OPENROUTER_THINKING_KEY: {'SET' if OPENROUTER_THINKING_KEY else 'MISSING'}")
+    checks.append(f"GEMINI_API_KEY: {'SET' if GEMINI_API_KEY else 'MISSING'}")
+    checks.append(f"FFMPEG: {'FOUND' if FFMPEG_PATH and Path(FFMPEG_PATH).exists() else 'MISSING'}")
+
+    async with aiohttp.ClientSession() as session:
+        try:
+            r = await session.get(TTS_API_URL, timeout=aiohttp.ClientTimeout(total=5))
+            checks.append(f"TTS endpoint: {r.status}")
+        except Exception as e:
+            checks.append(f"TTS endpoint error: {str(e)[:200]}")
+        try:
+            r = await session.get(THINKING_API_URL, timeout=aiohttp.ClientTimeout(total=5))
+            checks.append(f"Thinking endpoint: {r.status}")
+        except Exception as e:
+            checks.append(f"Thinking endpoint error: {str(e)[:200]}")
+        try:
+            r = await session.get(GEMINI_BASE_URL, timeout=aiohttp.ClientTimeout(total=5))
+            checks.append(f"Gemini base URL: {r.status}")
+        except Exception as e:
+            checks.append(f"Gemini base URL error: {str(e)[:200]}")
+
+    await message.answer("\n".join(checks))
+
+
 async def main():
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN topilmadi! .env faylni tekshiring.")
