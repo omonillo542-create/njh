@@ -552,6 +552,8 @@ async def cmd_start(message: Message, state: FSMContext):
         parse_mode=ParseMode.HTML,
         reply_markup=mode_keyboard(),
     )
+    # Yangi: /start bosilganda ham to'g'ridan-to'g'ri rejim tanlashga ruxsat beramiz
+    await state.set_state(Flow.choosing_mode)
 
 
 @dp.message(Command("help"))
