@@ -37,7 +37,12 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_THINKING_KEY = os.getenv("OPENROUTER_THINKING_KEY")
-GEMINI_API_KEY = os.getenv("MIYYA_API_KEY")
+# Accept multiple possible env var names for Gemini/MIYYA key
+GEMINI_API_KEY = (
+    os.getenv("MIYYA_API_KEY")
+    or os.getenv("GEMINI_API_KEY")
+    or os.getenv("GOOGLE_API_KEY")
+)
 
 # --- Konfiguratsiya ---
 TTS_API_URL = "https://openrouter.ai/api/v1/audio/speech"
@@ -412,7 +417,7 @@ async def improve_prompt(text: str, mode: str = "tts") -> str:
 async def gemini_chat(user_message: str, system_prompt: str | None = None) -> str | None:
     """Gemini API orqali matn javobini qaytaradi."""
     if not GEMINI_API_KEY:
-        logger.warning("GEMINI_API_KEY topilmadi")
+        logger.warning("GEMINI API kaliti topilmadi (MIYYA/GEMINI/GOOGLE).")
         return None
 
     url = f"{GEMINI_BASE_URL}/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
@@ -482,7 +487,7 @@ async def gemini_stt(audio_bytes: bytes, mime_type: str = "audio/ogg") -> str | 
     import base64
 
     if not GEMINI_API_KEY:
-        logger.warning("GEMINI_API_KEY topilmadi")
+        logger.warning("GEMINI API kaliti topilmadi (MIYYA/GEMINI/GOOGLE).")
         return None
 
     url = f"{GEMINI_BASE_URL}/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
@@ -694,6 +699,10 @@ async def mode_chosen(message: Message, state: FSMContext):
         await state.set_state(Flow.waiting_grandpa_text)
 
     elif "AI Yordamchi" in text or "🤖" in text:
+        # Agar GEMINI kaliti yo'q bo'lsa, foydalanuvchiga bildirish
+        if not GEMINI_API_KEY:
+            await message.answer("⚠️ AI Yordamchi hozir faol emas — serverda Gemini kaliti topilmadi.")
+            return
         await message.answer(
             "🤖 <b>AI Yordamchi</b>\n\n"
             "Men sizga yordam bera olaman! Savolingizni yozing:\n"
@@ -853,6 +862,11 @@ async def ai_chat_handler(message: Message, state: FSMContext):
 
     if not text:
         await message.answer("⚠️ Iltimos, savolingizni yozing.")
+        return
+
+    # Oldindan tekshiruv: GEMINI kaliti mavjudmi?
+    if not GEMINI_API_KEY:
+        await message.answer("⚠️ AI Yordamchi hozir faol emas — serverda Gemini kaliti topilmadi.")
         return
 
     processing_msg = await message.answer("🤖 Javob tayyorlanmoqda...")
@@ -1016,6 +1030,10 @@ async def main():
     if not OPENROUTER_API_KEY:
         logger.error("OPENROUTER_API_KEY topilmadi! .env faylni tekshiring.")
         return
+
+    # Eslatma: GEMINI kaliti ixtiyoriy, lekin AI Yordamchi uchun kerak
+    if not GEMINI_API_KEY:
+        logger.warning("GEMINI API kaliti topilmadi — AI Yordamchi ishlamaydi.")
 
     bot = Bot(token=BOT_TOKEN)
     logger.info("Bot ishga tushdi!")
