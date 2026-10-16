@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 import imageio_ffmpeg
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart, Command, StateFilter
 from aiogram.types import (
     Message,
     ReplyKeyboardMarkup,
@@ -528,7 +528,7 @@ async def gemini_stt(audio_bytes: bytes, mime_type: str = "audio/ogg") -> str | 
         logger.warning("GEMINI API kaliti topilmadi (MIYYA/GEMINI/GOOGLE).")
         return None
     url = f"{GEMINI_BASE_URL}/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    payload = {"contents": [{"parts": [{"inline_data": {"mime_type": mime_type, "data": base64.b64encode(audio_bytes).decode("utf-8")}}, {"text": "Bu ovozli xabar. Undagi so'zlarni aniq transkripsiya qiling. Faqat transkripsiya matnini qaytaring."}]}]}
+    payload = {"contents": [{"parts": [{"inline_data": {"mime_type": mime_type, "data": base64.b64encode(audio_bytes).decode("utf-8")}}, {"text": "Bu ovozli xabar. Undagi so'zlarni aniq transkripsiya qiling."}]}]}
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=60)) as resp:
@@ -622,16 +622,38 @@ async def voice_selected(callback: CallbackQuery, state: FSMContext):
             break
     await callback.message.edit_text(f"✅ Ovoz tanlandi: <b>{voice_name}</b>\n\nEndi rejani tanlang:", parse_mode=ParseMode.HTML)
     await callback.answer()
-    await callback.message.answer("📋 <b>Qaysi rejimda ishlaysiz?</b>\n\n1️⃣ <b>Matn → Ovoz</b>\n    Matn yozaman, ovozli xabar olaman\n\n2️⃣ <b>Ovoz → Matn</b>\n    Ovoz yuboraman, matn olaman", parse_mode=ParseMode.HTML, reply_markup=mode_keyboard())
+    await callback.message.answer("📋 <b>Qaysi rejimda ishlaysiz?</b>\n\n1️⃣ <b>Matn → Ovoz</b>\n    Matn yozaman, ovozli xabar olaman\n\n2️⃣ <b>Ovoz → Matn</b>\n    Ovoz yuboraman, matnni olaman\n\n👴 <b>Grandpa effekti</b>\n    Keksa odam ovozi\n\n📜 <b>Senariy</b>\n    Har bir qahramon alohida ovozga ega bo'ladi\n\n🤖 <b>AI Yordamchi</b>\n    Savollarga javob beradi\n\n⚙️ <b>Ovozlar</b>\n    Turli ovozlar va kategoriya\n\nℹ️ <b>Yordam</b>", parse_mode=ParseMode.HTML)
     await state.set_state(Flow.choosing_mode)
 
 
-@dp.message(F.text == "🔄 Boshidan boshlash")
-async def restart(message: Message, state: FSMContext):
-    uid = message.from_user.id
-    user_data[uid] = {"voice": DEFAULT_VOICE}
-    await state.clear()
-    await message.answer("🔄 <b>Qaytadan boshlaymiz!</b>\n\nAvval <b>rejimni tanlang</b> yoki <b>ovozlarni sozlang</b>:", parse_mode=ParseMode.HTML, reply_markup=mode_keyboard())
+@dp.message(StateFilter(Flow.choosing_mode), F.text)
+async def mode_chosen(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
+
+    if "Matn → Ovoz" in text or "1️⃣" in text:
+        await message.answer("📝 <b>Matn → Ovoz rejimi</b>\n\nMatn yozing — men uni ovozga aylantirib beraman:", parse_mode=ParseMode.HTML)
+        await state.set_state(Flow.waiting_tts_text)
+    elif "Ovoz → Matn" in text or "2️⃣" in text:
+        await message.answer("🎙️ <b>Ovoz → Matn rejimi</b>\n\nEndi <b>ovozli xabar</b> yuboring (mikrofon tugmasi) —\nmen uni matnga aylantirib beraman.", parse_mode=ParseMode.HTML)
+        await state.set_state(Flow.waiting_stt)
+    elif "Grandpa" in text or "👴" in text:
+        await message.answer("👴 <b>Grandpa Effekti</b>\n\nMatn yozing — men uni <b>keksa odam ovozida</b> aylantirib beraman:", parse_mode=ParseMode.HTML)
+        await state.set_state(Flow.waiting_grandpa_text)
+    elif "AI Yordamchi" in text or "🤖" in text:
+        if not GEMINI_API_KEY:
+            await message.answer("⚠️ AI Yordamchi hozir faol emas — serverda Gemini kaliti topilmadi.")
+            return
+        await message.answer("🤖 <b>AI Yordamchi</b>\n\nMen sizga yordam bera olaman! Savolingizni yozing:", parse_mode=ParseMode.HTML)
+        await state.set_state(Flow.ai_chat)
+    elif "Senariy" in text or "📜" in text:
+        await message.answer("📜 <b>Senariy</b>\n\nSenariy matnini yuboring — men uni tahlil qilaman va har bir qahramon uchun alohida ovozlar tayyorlab beraman.", parse_mode=ParseMode.HTML)
+        await state.set_state(Flow.waiting_script)
+    elif text == "⚙️ Ovozlar":
+        await message.answer("🎙️ Ovozlarni tanlang:", reply_markup=voice_category_keyboard())
+    elif text == "ℹ️ Yordam":
+        await cmd_help(message)
+    else:
+        await message.answer("⚠️ Iltimos, tugmalardan birini tanlang:", reply_markup=mode_keyboard())
 
 
 @dp.message(F.text)
@@ -639,9 +661,18 @@ async def handle_free_text(message: Message, state: FSMContext):
     text = (message.text or "").strip()
     if not text:
         return
+
     current = await state.get_state()
-    if current in (Flow.waiting_tts_text.state, Flow.waiting_grandpa_text.state, Flow.waiting_stt.state, Flow.waiting_script.state, Flow.ai_chat.state, Flow.choosing_mode.state):
+    if current in (
+        Flow.waiting_tts_text.state,
+        Flow.waiting_grandpa_text.state,
+        Flow.waiting_stt.state,
+        Flow.waiting_script.state,
+        Flow.ai_chat.state,
+        Flow.choosing_mode.state,
+    ):
         return
+
     if looks_like_scenario(text):
         uid = message.from_user.id
         processing = await message.answer("📜 Senariy tahlil qilinmoqda...")
@@ -662,36 +693,8 @@ async def handle_free_text(message: Message, state: FSMContext):
             logger.error(f"Scenario error: {e}")
             await processing.edit_text(f"❌ Xatolik: {str(e)[:200]}")
         return
+
     await message.answer("Menga nima qilishni xohlaysiz? Masalan: 'matnni ovozga aylantir', 'ssenariy yuboraman', yoki 'bot haqida gapir'.", reply_markup=mode_keyboard())
-
-
-@dp.message(Flow.choosing_mode)
-async def mode_chosen(message: Message, state: FSMContext):
-    text = (message.text or "").strip()
-    if "Matn → Ovoz" in text or "1️⃣" in text:
-        await message.answer("📝 <b>Matn → Ovoz rejimi</b>\n\nMatn yozing — men uni ovozga aylantirib beraman:", parse_mode=ParseMode.HTML)
-        await state.set_state(Flow.waiting_tts_text)
-    elif "Ovoz → Matn" in text or "2️⃣" in text:
-        await message.answer("🎙️ <b>Ovoz → Matn rejimi</b>\n\nEndi <b>ovozli xabar</b> yuboring (mikrofon tugmasi) —\nmen uni matnga aylantirib beraman.\n\nTilni avtomatik aniqlayman 🌍", parse_mode=ParseMode.HTML)
-        await state.set_state(Flow.waiting_stt)
-    elif "Grandpa" in text or "👴" in text:
-        await message.answer("👴 <b>Grandpa Effekti</b>\n\nMatn yozing — men uni <b>keksa odam ovozida</b> aylantirib beraman:\n• Pastroq va tabiiy tembr\n• Biroz dag'al, xirillagan\n• Nutq tushunarli va ravon\n\nBoshqa ovoz rejimi uchun /start bosing.", parse_mode=ParseMode.HTML)
-        await state.set_state(Flow.waiting_grandpa_text)
-    elif "AI Yordamchi" in text or "🤖" in text:
-        if not GEMINI_API_KEY:
-            await message.answer("⚠️ AI Yordamchi hozir faol emas — serverda Gemini kaliti topilmadi.")
-            return
-        await message.answer("🤖 <b>AI Yordamchi</b>\n\nMen sizga yordam bera olaman! Savolingizni yozing:\n• Bot haqida savollar\n• Ovoz yaratish bo'yicha maslahat\n• Har qanday umumiy savol\n\nChiqish uchun /start bosing.", parse_mode=ParseMode.HTML)
-        await state.set_state(Flow.ai_chat)
-    elif "Senariy" in text or "📜" in text:
-        await message.answer("📜 <b>Senariy</b>\n\nSenariy matnini yuboring — men uni tahlil qilaman\nva har bir qahramon uchun alohida ovozlar tayyorlab beraman.\n\nMisol: Ota: ...\nQiz: ...", parse_mode=ParseMode.HTML)
-        await state.set_state(Flow.waiting_script)
-    elif text == "⚙️ Ovozlar":
-        await message.answer("🎙️ Ovozlarni tanlang:", reply_markup=voice_category_keyboard())
-    elif text == "ℹ️ Yordam":
-        await cmd_help(message)
-    else:
-        await message.answer("⚠️ Iltimos, tugmalardan birini tanlang:", reply_markup=mode_keyboard())
 
 
 @dp.message(Flow.waiting_tts_text)
